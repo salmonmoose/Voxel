@@ -1,520 +1,541 @@
 package salmonmoose;
 
-import java.io.BufferedReader;
-import java.io.FileInputStream;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.nio.FloatBuffer;
-
+import salmonmoose.BufferableData;
+import salmonmoose.glimg.DdsLoader;
+import salmonmoose.glimg.ImageSet;
+import salmonmoose.glimg.ImageSet.Dimensions;
+import salmonmoose.glimg.ImageSet.SingleImage;
+import salmonmoose.glimg.TextureGenerator;
+import salmonmoose.glm.*;
+import salmonmoose.glutil.MatrixStack;
+import salmonmoose.glutil.MousePoles.*;
+import salmonmoose.LWJGLWindow;
+import salmonmoose.framework.*;
+import salmonmoose.framework.Scene.SceneNode;
+import salmonmoose.framework.SceneBinders.UniformIntBinder;
+import salmonmoose.framework.SceneBinders.UniformMat4Binder;
+import salmonmoose.framework.SceneBinders.UniformVec3Binder;
 import org.lwjgl.BufferUtils;
-import org.lwjgl.LWJGLException;
 import org.lwjgl.input.Keyboard;
-import org.lwjgl.opengl.ContextAttribs;
-import org.lwjgl.opengl.Display;
-import org.lwjgl.opengl.DisplayMode;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL13;
-import org.lwjgl.opengl.GL15;
-import org.lwjgl.opengl.GL20;
-import org.lwjgl.opengl.GL30;
-import org.lwjgl.opengl.PixelFormat;
-import org.lwjgl.util.glu.GLU;
-import org.lwjgl.util.vector.Matrix4f;
-import org.lwjgl.util.vector.Vector3f;
+import org.lwjgl.input.Mouse;
 
-import de.matthiasmann.twl.utils.PNGDecoder;
-import de.matthiasmann.twl.utils.PNGDecoder.Format;
+import java.nio.FloatBuffer;
+import java.util.ArrayList;
 
-public class Voxel {
-	// Entry point for the application
-	public static void main(String[] args) {
-		new Voxel();
-	}
-	
-	// Setup variables
-	private final String WINDOW_TITLE = "Voxel";
-	private final int WIDTH = 800;
-	private final int HEIGHT = 600;
-	private final double PI = 3.14159265358979323846;
-	// Quad variables
-	private int vaoId = 0;
-	private int vboId = 0;
-	private int vboiId = 0;
-	private int indicesCount = 0;
-	private VertexData[] vertices = null;
-	private ByteBuffer verticesByteBuffer = null;
-	// Shader variables
-	private int pId = 0;
-	// Texture variables
-	private int[] texIds = new int[] {0, 0};
-	private int textureSelector = 0;
-	// Moving variables
-	private int projectionMatrixLocation = 0;
-	private int viewMatrixLocation = 0;
-	private int modelMatrixLocation = 0;
-	private Matrix4f projectionMatrix = null;
-	private Matrix4f viewMatrix = null;
-	private Matrix4f modelMatrix = null;
-	private Vector3f modelPos = null;
-	private Vector3f modelAngle = null;
-	private Vector3f modelScale = null;
-	private Vector3f cameraPos = null;
-	private FloatBuffer matrix44Buffer = null;
-	
-	public Voxel() {
-		// Initialize OpenGL (Display)
-		this.setupOpenGL();
-		
-		this.setupQuad();
-		this.setupShaders();
-		this.setupTextures();
-		this.setupMatrices();
-		
-		while (!Display.isCloseRequested()) {
-			// Do a single loop (logic/render)
-			this.loopCycle();
-			
-			// Force a maximum FPS of about 60
-			Display.sync(60);
-			// Let the CPU synchronize with the GPU if GPU is tagging behind
-			Display.update();
-		}
-		
-		// Destroy OpenGL (Display)
-		this.destroyOpenGL();
-	}
+import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL12.*;
+import static org.lwjgl.opengl.GL13.*;
+import static org.lwjgl.opengl.GL15.*;
+import static org.lwjgl.opengl.GL20.*;
+import static org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_SRGB;
+import static org.lwjgl.opengl.GL30.glBindBufferRange;
+import static org.lwjgl.opengl.GL31.GL_UNIFORM_BUFFER;
+import static org.lwjgl.opengl.GL32.GL_DEPTH_CLAMP;
+import static org.lwjgl.opengl.GL33.*;
 
-	private void setupMatrices() {
-		// Setup projection matrix
-		projectionMatrix = new Matrix4f();
-		float fieldOfView = 60f;
-		float aspectRatio = (float)WIDTH / (float)HEIGHT;
-		float near_plane = 0.1f;
-		float far_plane = 100f;
-		
-		float y_scale = this.coTangent(this.degreesToRadians(fieldOfView / 2f));
-		float x_scale = y_scale / aspectRatio;
-		float frustum_length = far_plane - near_plane;
-		
-		projectionMatrix.m00 = x_scale;
-		projectionMatrix.m11 = y_scale;
-		projectionMatrix.m22 = -((far_plane + near_plane) / frustum_length);
-		projectionMatrix.m23 = -1;
-		projectionMatrix.m32 = -((2 * near_plane * far_plane) / frustum_length);
-                projectionMatrix.m33 = 0;
-		
-		// Setup view matrix
-		viewMatrix = new Matrix4f();
-		
-		// Setup model matrix
-		modelMatrix = new Matrix4f();
-		
-		// Create a FloatBuffer with the proper size to store our matrices later
-		matrix44Buffer = BufferUtils.createFloatBuffer(16);
-	}
 
-	private void setupTextures() {
-		texIds[0] = this.loadPNGTexture("assets/images/stGrid1.png", GL13.GL_TEXTURE0);
-		texIds[1] = this.loadPNGTexture("assets/images/stGrid2.png", GL13.GL_TEXTURE0);
-		
-		this.exitOnGLError("setupTexture");
-	}
+public class Voxel extends LWJGLWindow {
+    public static void main(String[] args) {
+        //Framework.CURRENT_TUTORIAL_DATAPATH = "/fcagnin/jgltut/tut17/data/";
 
-	private void setupOpenGL() {
-		// Setup an OpenGL context with API version 3.2
-		try {
-			PixelFormat pixelFormat = new PixelFormat();
-			ContextAttribs contextAtrributes = new ContextAttribs(3, 2)
-				.withForwardCompatible(true)
-				.withProfileCore(true);
-			
-			Display.setDisplayMode(new DisplayMode(WIDTH, HEIGHT));
-			Display.setTitle(WINDOW_TITLE);
-			Display.create(pixelFormat, contextAtrributes);
-			
-			GL11.glViewport(0, 0, WIDTH, HEIGHT);
-		} catch (LWJGLException e) {
-			e.printStackTrace();
-			System.exit(-1);
-		}
-		
-		// Setup an XNA like background color
-		GL11.glClearColor(0.4f, 0.6f, 0.9f, 0f);
-		
-		// Map the internal OpenGL coordinate system to the entire screen
-		GL11.glViewport(0, 0, WIDTH, HEIGHT);
-		
-		this.exitOnGLError("setupOpenGL");
-	}
-	
-	private void setupQuad() {
-		// We'll define our quad using 4 vertices of the custom 'TexturedVertex' class
-		VertexData v0 = new VertexData(); 
-		v0.setXYZ(-0.5f, 0.5f, 0); v0.setRGB(1, 0, 0); v0.setST(0, 0);
-		VertexData v1 = new VertexData(); 
-		v1.setXYZ(-0.5f, -0.5f, 0); v1.setRGB(0, 1, 0); v1.setST(0, 1);
-		VertexData v2 = new VertexData(); 
-		v2.setXYZ(0.5f, -0.5f, 0); v2.setRGB(0, 0, 1); v2.setST(1, 1);
-		VertexData v3 = new VertexData(); 
-		v3.setXYZ(0.5f, 0.5f, 0); v3.setRGB(1, 1, 1); v3.setST(1, 0);
-		
-		vertices = new VertexData[] {v0, v1, v2, v3};
-		
-		// Put each 'Vertex' in one FloatBuffer
-		verticesByteBuffer = BufferUtils.createByteBuffer(vertices.length * 
-				VertexData.stride);				
-		FloatBuffer verticesFloatBuffer = verticesByteBuffer.asFloatBuffer();
-		for (int i = 0; i < vertices.length; i++) {
-			// Add position, color and texture floats to the buffer
-			verticesFloatBuffer.put(vertices[i].getElements());
-		}
-		verticesFloatBuffer.flip();
-		
-		
-		// OpenGL expects to draw vertices in counter clockwise order by default
-		byte[] indices = {
-				0, 1, 2,
-				2, 3, 0
-		};
-		indicesCount = indices.length;
-		ByteBuffer indicesBuffer = BufferUtils.createByteBuffer(indicesCount);
-		indicesBuffer.put(indices);
-		indicesBuffer.flip();
-		
-		// Create a new Vertex Array Object in memory and select it (bind)
-		vaoId = GL30.glGenVertexArrays();
-		GL30.glBindVertexArray(vaoId);
-		
-		// Create a new Vertex Buffer Object in memory and select it (bind)
-		vboId = GL15.glGenBuffers();
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vboId);
-		GL15.glBufferData(GL15.GL_ARRAY_BUFFER, verticesFloatBuffer, GL15.GL_STREAM_DRAW);
-		
-		// Put the position coordinates in attribute list 0
-		GL20.glVertexAttribPointer(0, VertexData.positionElementCount, GL11.GL_FLOAT, 
-				false, VertexData.stride, VertexData.positionByteOffset);
-		// Put the color components in attribute list 1
-		GL20.glVertexAttribPointer(1, VertexData.colorElementCount, GL11.GL_FLOAT, 
-				false, VertexData.stride, VertexData.colorByteOffset);
-		// Put the texture coordinates in attribute list 2
-		GL20.glVertexAttribPointer(2, VertexData.textureElementCount, GL11.GL_FLOAT, 
-				false, VertexData.stride, VertexData.textureByteOffset);
-		
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-		
-		// Deselect (bind to 0) the VAO
-		GL30.glBindVertexArray(0);
-		
-		// Create a new VBO for the indices and select it (bind) - INDICES
-		vboiId = GL15.glGenBuffers();
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, vboiId);
-		GL15.glBufferData(GL15.GL_ELEMENT_ARRAY_BUFFER, indicesBuffer, 
-				GL15.GL_STATIC_DRAW);
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-		
-		// Set the default quad rotation, scale and position values
-		modelPos = new Vector3f(0, 0, 0);
-		modelAngle = new Vector3f(0, 0, 0);
-		modelScale = new Vector3f(1, 1, 1);
-		cameraPos = new Vector3f(0, 0, -1);
-		
-		this.exitOnGLError("setupQuad");
-	}
-	
-	private void setupShaders() {		
-		// Load the vertex shader
-		int vsId = this.loadShader("assets/shaders/vertex.glsl", GL20.GL_VERTEX_SHADER);
-		// Load the fragment shader
-		int fsId = this.loadShader("assets/shaders/fragment.glsl", GL20.GL_FRAGMENT_SHADER);
-		
-		// Create a new shader program that links both shaders
-		pId = GL20.glCreateProgram();
-		GL20.glAttachShader(pId, vsId);
-		GL20.glAttachShader(pId, fsId);
+        new Voxel().start( displayWidth, displayHeight );
+    }
 
-		// Position information will be attribute 0
-		GL20.glBindAttribLocation(pId, 0, "in_Position");
-		// Color information will be attribute 1
-		GL20.glBindAttribLocation(pId, 1, "in_Color");
-		// Textute information will be attribute 2
-		GL20.glBindAttribLocation(pId, 2, "in_TextureCoord");
 
-		GL20.glLinkProgram(pId);
-		GL20.glValidateProgram(pId);
+    @Override
+    protected void init() {
+        glEnable( GL_CULL_FACE );
+        glCullFace( GL_BACK );
+        glFrontFace( GL_CW );
 
-		// Get matrices uniform locations
-		projectionMatrixLocation = GL20.glGetUniformLocation(pId,"projectionMatrix");
-		viewMatrixLocation = GL20.glGetUniformLocation(pId, "viewMatrix");
-		modelMatrixLocation = GL20.glGetUniformLocation(pId, "modelMatrix");
+        final float depthZNear = 0.0f;
+        final float depthZFar = 1.0f;
 
-		this.exitOnGLError("setupShaders");
-	}
-	
-	private void logicCycle() {
-		//-- Input processing
-		float rotationDelta = 15f;
-		float scaleDelta = 0.1f;
-		float posDelta = 0.1f;
-		Vector3f scaleAddResolution = new Vector3f(scaleDelta, scaleDelta, scaleDelta);
-		Vector3f scaleMinusResolution = new Vector3f(-scaleDelta, -scaleDelta, 
-				-scaleDelta);
-		
-		while(Keyboard.next()) {			
-			// Only listen to events where the key was pressed (down event)
-			if (!Keyboard.getEventKeyState()) continue;
-			
-			// Switch textures depending on the key released
-			switch (Keyboard.getEventKey()) {
-			case Keyboard.KEY_1:
-				textureSelector = 0;
-				break;
-			case Keyboard.KEY_2:
-				textureSelector = 1;
-				break;
-			}
-			
-			// Change model scale, rotation and translation values
-			switch (Keyboard.getEventKey()) {
-			// Move
-			case Keyboard.KEY_UP:
-				modelPos.y += posDelta;
-				break;
-			case Keyboard.KEY_DOWN:
-				modelPos.y -= posDelta;
-				break;
-			// Scale
-			case Keyboard.KEY_P:
-				Vector3f.add(modelScale, scaleAddResolution, modelScale);
-				break;
-			case Keyboard.KEY_M:
-				Vector3f.add(modelScale, scaleMinusResolution, modelScale);
-				break;
-			// Rotation
-			case Keyboard.KEY_LEFT:
-				modelAngle.z += rotationDelta;
-				break;
-			case Keyboard.KEY_RIGHT:
-				modelAngle.z -= rotationDelta;
-				break;
-			}
-		}
-		
-		//-- Update matrices
-		// Reset view and model matrices
-		viewMatrix = new Matrix4f();
-		modelMatrix = new Matrix4f();
-		
-		// Translate camera
-		Matrix4f.translate(cameraPos, viewMatrix, viewMatrix);
-		
-		// Scale, translate and rotate model
-		Matrix4f.scale(modelScale, modelMatrix, modelMatrix);
-		Matrix4f.translate(modelPos, modelMatrix, modelMatrix);
-		Matrix4f.rotate(this.degreesToRadians(modelAngle.z), new Vector3f(0, 0, 1), 
-				modelMatrix, modelMatrix);
-		Matrix4f.rotate(this.degreesToRadians(modelAngle.y), new Vector3f(0, 1, 0), 
-				modelMatrix, modelMatrix);
-		Matrix4f.rotate(this.degreesToRadians(modelAngle.x), new Vector3f(1, 0, 0), 
-				modelMatrix, modelMatrix);
-		
-		// Upload matrices to the uniform variables
-		GL20.glUseProgram(pId);
-		
-		projectionMatrix.store(matrix44Buffer); matrix44Buffer.flip();
-		GL20.glUniformMatrix4(projectionMatrixLocation, false, matrix44Buffer);
-		viewMatrix.store(matrix44Buffer); matrix44Buffer.flip();
-		GL20.glUniformMatrix4(viewMatrixLocation, false, matrix44Buffer);
-		modelMatrix.store(matrix44Buffer); matrix44Buffer.flip();
-		GL20.glUniformMatrix4(modelMatrixLocation, false, matrix44Buffer);
-		
-		GL20.glUseProgram(0);
-		
-		this.exitOnGLError("logicCycle");
-	}
-	
-	private void renderCycle() {
-		GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
-		
-		GL20.glUseProgram(pId);
-		
-		// Bind the texture
-		GL13.glActiveTexture(GL13.GL_TEXTURE0);
-		GL11.glBindTexture(GL11.GL_TEXTURE_2D, texIds[textureSelector]);
-		
-		// Bind to the VAO that has all the information about the vertices
-		GL30.glBindVertexArray(vaoId);
-		GL20.glEnableVertexAttribArray(0);
-		GL20.glEnableVertexAttribArray(1);
-		GL20.glEnableVertexAttribArray(2);
-		
-		// Bind to the index VBO that has all the information about the order of the vertices
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, vboiId);
-		
-		// Draw the vertices
-		GL11.glDrawElements(GL11.GL_TRIANGLES, indicesCount, GL11.GL_UNSIGNED_BYTE, 0);
-		
-		// Put everything back to default (deselect)
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-		GL20.glDisableVertexAttribArray(0);
-		GL20.glDisableVertexAttribArray(1);
-		GL20.glDisableVertexAttribArray(2);
-		GL30.glBindVertexArray(0);
-		
-		GL20.glUseProgram(0);
-		
-		this.exitOnGLError("renderCycle");
-	}
-	
-	private void loopCycle() {
-		// Update logic
-		this.logicCycle();
-		// Update rendered frame
-		this.renderCycle();
-		
-		this.exitOnGLError("loopCycle");
-	}
-	
-	private void destroyOpenGL() {	
-		// Delete the texture
-		GL11.glDeleteTextures(texIds[0]);
-		GL11.glDeleteTextures(texIds[1]);
-		
-		// Delete the shaders
-		GL20.glUseProgram(0);
-		GL20.glDeleteProgram(pId);
-		
-		// Select the VAO
-		GL30.glBindVertexArray(vaoId);
-		
-		// Disable the VBO index from the VAO attributes list
-		GL20.glDisableVertexAttribArray(0);
-		GL20.glDisableVertexAttribArray(1);
-		
-		// Delete the vertex VBO
-		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-		GL15.glDeleteBuffers(vboId);
-		
-		// Delete the index VBO
-		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
-		GL15.glDeleteBuffers(vboiId);
-		
-		// Delete the VAO
-		GL30.glBindVertexArray(0);
-		GL30.glDeleteVertexArrays(vaoId);
-		
-		this.exitOnGLError("destroyOpenGL");
-		
-		Display.destroy();
-	}
-	
-	private int loadShader(String filename, int type) {
-		StringBuilder shaderSource = new StringBuilder();
-		int shaderID = 0;
-		
-		try {
-			BufferedReader reader = new BufferedReader(new FileReader(filename));
-			String line;
-			while ((line = reader.readLine()) != null) {
-				shaderSource.append(line).append("\n");
-			}
-			reader.close();
-		} catch (IOException e) {
-			System.err.println("Could not read file.");
-			e.printStackTrace();
-			System.exit(-1);
-		}
-		
-		shaderID = GL20.glCreateShader(type);
-		GL20.glShaderSource(shaderID, shaderSource);
-		GL20.glCompileShader(shaderID);
-		
-		if (GL20.glGetShader(shaderID, GL20.GL_COMPILE_STATUS) == GL11.GL_FALSE) {
-			System.err.println("Could not compile shader: " + filename);
-			System.exit(-1);
-		}
-		
-		this.exitOnGLError("loadShader");
-		
-		System.err.println("Compiled shader: " + filename);
+        glEnable( GL_DEPTH_TEST );
+        glDepthMask( true );
+        glDepthFunc( GL_LEQUAL );
+        glDepthRange( depthZNear, depthZFar );
+        glEnable( GL_DEPTH_CLAMP );
+        glEnable( GL_FRAMEBUFFER_SRGB );
 
-		return shaderID;
-	}
-	
-	private int loadPNGTexture(String filename, int textureUnit) {
-		ByteBuffer buf = null;
-		int tWidth = 0;
-		int tHeight = 0;
-		
-		try {
-			// Open the PNG file as an InputStream
-			InputStream in = new FileInputStream(filename);
-			// Link the PNG decoder to this stream
-			PNGDecoder decoder = new PNGDecoder(in);
-			
-			// Get the width and height of the texture
-			tWidth = decoder.getWidth();
-			tHeight = decoder.getHeight();
-			
-			
-			// Decode the PNG file in a ByteBuffer
-			buf = ByteBuffer.allocateDirect(
-					4 * decoder.getWidth() * decoder.getHeight());
-			decoder.decode(buf, decoder.getWidth() * 4, Format.RGBA);
-			buf.flip();
-			
-			in.close();
-		} catch (IOException e) {
-			e.printStackTrace();
-			System.exit(-1);
-		}
-		
-		// Create a new texture object in memory and bind it
-		int texId = GL11.glGenTextures();
-		GL13.glActiveTexture(textureUnit);
-		GL11.glBindTexture(GL11.GL_TEXTURE_2D, texId);
-		
-		// All RGB bytes are aligned to each other and each component is 1 byte
-		GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
-		
-		// Upload the texture data and generate mip maps (for scaling)
-		GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGB, tWidth, tHeight, 0, 
-				GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buf);
-		GL30.glGenerateMipmap(GL11.GL_TEXTURE_2D);
-		
-		// Setup the ST coordinate system
-		GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL11.GL_REPEAT);
-		GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL11.GL_REPEAT);
-		
-		// Setup what to do when the texture has to be scaled
-		GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, 
-				GL11.GL_LINEAR);
-		GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, 
-				GL11.GL_LINEAR_MIPMAP_LINEAR);
-		
-		this.exitOnGLError("loadPNGTexture");
-		
-		return texId;
-	}
-	
-	private float coTangent(float angle) {
-		return (float)(1f / Math.tan(angle));
-	}
-	
-	private float degreesToRadians(float degrees) {
-		return degrees * (float)(PI / 180d);
-	}
-	
-	private void exitOnGLError(String errorMessage) {
-		int errorValue = GL11.glGetError();
-		
-		if (errorValue != GL11.GL_NO_ERROR) {
-			String errorString = GLU.gluErrorString(errorValue);
-			System.err.println("ERROR - " + errorMessage + ": " + errorString);
-			
-			if (Display.isCreated()) Display.destroy();
-			System.exit(-1);
-		}
-	}
+        // Setup our Uniform Buffers
+        projectionUniformBuffer = glGenBuffers();
+        glBindBuffer( GL_UNIFORM_BUFFER, projectionUniformBuffer );
+        glBufferData( GL_UNIFORM_BUFFER, ProjectionBlock.SIZE, GL_STREAM_DRAW );
+
+        glBindBufferRange( GL_UNIFORM_BUFFER, projectionBlockIndex, projectionUniformBuffer, 0, ProjectionBlock.SIZE );
+
+        createSamplers();
+        loadTextures();
+
+        try {
+            loadAndSetupScene();
+        } catch ( Exception exception ) {
+            exception.printStackTrace();
+            System.exit( -1 );
+        }
+
+        lightUniformBuffer = glGenBuffers();
+        glBindBuffer( GL_UNIFORM_BUFFER, lightUniformBuffer );
+        glBufferData( GL_UNIFORM_BUFFER, LightBlock.SIZE, GL_STREAM_DRAW );
+
+        glBindBufferRange( GL_UNIFORM_BUFFER, lightBlockIndex, lightUniformBuffer, 0, LightBlock.SIZE );
+
+        glBindBuffer( GL_UNIFORM_BUFFER, 0 );
+    }
+
+    @Override
+    protected void display() {
+        timer.update( getElapsedTime() );
+
+        glClearColor( 0.8f, 0.8f, 0.8f, 1.0f );
+        glClearDepth( 1.0f );
+        glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+        final Mat4 cameraMatrix = viewPole.calcMatrix();
+        final Mat4 lightView = lightPole.calcMatrix();
+
+        MatrixStack modelMatrix = new MatrixStack();
+        modelMatrix.applyMatrix( cameraMatrix );
+
+        buildLights( cameraMatrix );
+
+        nodes.get( 0 ).nodeSetOrient( Glm.rotate( new Quaternion( 1.0f ), 360.0f * timer.getAlpha(),
+                new Vec3( 0.0f, 1.0f, 0.0f ) ) );
+
+        nodes.get( 3 ).nodeSetOrient( Quaternion.mul( spinBarOrient, Glm.rotate( new Quaternion( 1.0f ),
+                360.0f * timer.getAlpha(), new Vec3( 0.0f, 0.0f, 1.0f ) ) ) );
+
+        {
+            MatrixStack persMatrix = new MatrixStack();
+            persMatrix.perspective( 60.0f, displayWidth / (float) displayHeight, zNear, zFar );
+
+            ProjectionBlock projData = new ProjectionBlock();
+            projData.cameraToClipMatrix = persMatrix.top();
+
+            glBindBuffer( GL_UNIFORM_BUFFER, projectionUniformBuffer );
+            glBufferData( GL_UNIFORM_BUFFER, projData.fillAndFlipBuffer( mat4Buffer ), GL_STREAM_DRAW );
+            glBindBuffer( GL_UNIFORM_BUFFER, 0 );
+        }
+
+        glActiveTexture( GL_TEXTURE0 + lightProjTexUnit );
+        glBindTexture( GL_TEXTURE_CUBE_MAP, lightTextures[currTextureIndex] );
+        glBindSampler( lightProjTexUnit, samplers[currSampler] );
+
+        {
+            MatrixStack lightProjStack = new MatrixStack();
+            lightProjStack.applyMatrix( Glm.inverse( lightView ) );
+            lightProjStack.applyMatrix( Glm.inverse( cameraMatrix ) );
+
+            lightProjMatBinder.setValue( lightProjStack.top() );
+
+            Vec4 worldLightPos = lightView.getColumn( 3 );
+            Vec3 lightPos = new Vec3( Mat4.mul( cameraMatrix, worldLightPos ) );
+
+            camLightPosBinder.setValue( lightPos );
+        }
+
+        glViewport( 0, 0, displayWidth, displayHeight );
+        scene.render( modelMatrix.top() );
+
+        {
+            // Draw axes
+            modelMatrix.push();
+
+            modelMatrix.applyMatrix( lightView );
+            modelMatrix.scale( 15.0f );
+
+            glUseProgram( coloredProg );
+            glUniformMatrix4( coloredModelToCameraMatrixUnif, false,
+                    modelMatrix.top().fillAndFlipBuffer( mat4Buffer ) );
+            axesMesh.render();
+
+            modelMatrix.pop();
+        }
+
+        if ( drawCameraPos ) {
+            modelMatrix.push();
+
+            // Draw lookat point.
+            modelMatrix.setIdentity();
+            modelMatrix.translate( 0.0f, 0.0f, -viewPole.getView().radius );
+            modelMatrix.scale( 0.5f );
+
+            glDisable( GL_DEPTH_TEST );
+            glDepthMask( false );
+            glUseProgram( unlitProg );
+            glUniformMatrix4( unlitModelToCameraMatrixUnif, false, modelMatrix.top().fillAndFlipBuffer( mat4Buffer ) );
+            glUniform4f( unlitObjectColorUnif, 0.25f, 0.25f, 0.25f, 1.0f );
+            sphereMesh.render( "flat" );
+            glDepthMask( true );
+            glEnable( GL_DEPTH_TEST );
+            glUniform4f( unlitObjectColorUnif, 1.0f, 1.0f, 1.0f, 1.0f );
+            sphereMesh.render( "flat" );
+
+            modelMatrix.pop();
+        }
+
+        glActiveTexture( GL_TEXTURE0 + lightProjTexUnit );
+        glBindTexture( GL_TEXTURE_CUBE_MAP, 0 );
+        glBindSampler( lightProjTexUnit, 0 );
+    }
+
+    @Override
+    protected void reshape(int w, int h) {
+        displayWidth = w;
+        displayHeight = h;
+    }
+
+    @Override
+    protected void update() {
+        while ( Mouse.next() ) {
+            int eventButton = Mouse.getEventButton();
+
+            if ( eventButton != -1 ) {
+                boolean pressed = Mouse.getEventButtonState();
+                MousePole.forwardMouseButton( viewPole, eventButton, pressed, Mouse.getX(), Mouse.getY() );
+                MousePole.forwardMouseButton( lightPole, eventButton, pressed, Mouse.getX(), Mouse.getY() );
+            } else {
+                // Mouse moving or mouse scrolling
+                int dWheel = Mouse.getDWheel();
+
+                if ( dWheel != 0 ) {
+                    MousePole.forwardMouseWheel( viewPole, dWheel, dWheel, Mouse.getX(), Mouse.getY() );
+                    MousePole.forwardMouseWheel( lightPole, dWheel, dWheel, Mouse.getX(), Mouse.getY() );
+                }
+
+                if ( Mouse.isButtonDown( 0 ) || Mouse.isButtonDown( 1 ) || Mouse.isButtonDown( 2 ) ) {
+                    MousePole.forwardMouseMotion( viewPole, Mouse.getX(), Mouse.getY() );
+                    MousePole.forwardMouseMotion( lightPole, Mouse.getX(), Mouse.getY() );
+                }
+            }
+        }
+
+
+        float lastFrameDuration = getLastFrameDuration() * 10 / 1000.0f;
+
+        if ( Keyboard.isKeyDown( Keyboard.KEY_W ) ) {
+            viewPole.charPress( Keyboard.KEY_W, Keyboard.isKeyDown( Keyboard.KEY_LSHIFT ) ||
+                    Keyboard.isKeyDown( Keyboard.KEY_RSHIFT ), lastFrameDuration );
+        } else if ( Keyboard.isKeyDown( Keyboard.KEY_S ) ) {
+            viewPole.charPress( Keyboard.KEY_S, Keyboard.isKeyDown( Keyboard.KEY_LSHIFT ) ||
+                    Keyboard.isKeyDown( Keyboard.KEY_RSHIFT ), lastFrameDuration );
+        }
+
+        if ( Keyboard.isKeyDown( Keyboard.KEY_D ) ) {
+            viewPole.charPress( Keyboard.KEY_D, Keyboard.isKeyDown( Keyboard.KEY_LSHIFT ) ||
+                    Keyboard.isKeyDown( Keyboard.KEY_RSHIFT ), lastFrameDuration );
+        } else if ( Keyboard.isKeyDown( Keyboard.KEY_A ) ) {
+            viewPole.charPress( Keyboard.KEY_A, Keyboard.isKeyDown( Keyboard.KEY_LSHIFT ) ||
+                    Keyboard.isKeyDown( Keyboard.KEY_RSHIFT ), lastFrameDuration );
+        }
+
+        if ( Keyboard.isKeyDown( Keyboard.KEY_E ) ) {
+            viewPole.charPress( Keyboard.KEY_E, Keyboard.isKeyDown( Keyboard.KEY_LSHIFT ) ||
+                    Keyboard.isKeyDown( Keyboard.KEY_RSHIFT ), lastFrameDuration );
+        } else if ( Keyboard.isKeyDown( Keyboard.KEY_Q ) ) {
+            viewPole.charPress( Keyboard.KEY_Q, Keyboard.isKeyDown( Keyboard.KEY_LSHIFT ) ||
+                    Keyboard.isKeyDown( Keyboard.KEY_RSHIFT ), lastFrameDuration );
+        }
+
+
+        while ( Keyboard.next() ) {
+            if ( Keyboard.getEventKeyState() ) {
+                switch ( Keyboard.getEventKey() ) {
+                    case Keyboard.KEY_SPACE:
+                        lightPole.reset();
+                        break;
+
+                    case Keyboard.KEY_T:
+                        drawCameraPos = !drawCameraPos;
+                        break;
+
+                    case Keyboard.KEY_G:
+                        showOtherLights = !showOtherLights;
+                        break;
+
+                    case Keyboard.KEY_P:
+                        timer.togglePause();
+                        break;
+
+                    case Keyboard.KEY_1:
+                    case Keyboard.KEY_2:
+                        int number = Keyboard.getEventKey() - Keyboard.KEY_1;
+                        currTextureIndex = number;
+                        System.out.printf( "%s\n", texDefs[currTextureIndex].name );
+                        break;
+
+                    case Keyboard.KEY_ESCAPE:
+                        leaveMainLoop();
+                        break;
+                }
+            }
+        }
+    }
+
+
+    ////////////////////////////////
+    private final float zNear = 1.0f;
+    private final float zFar = 1000.0f;
+
+    private int coloredModelToCameraMatrixUnif;
+    private int coloredProg;
+
+    private int unlitProg;
+    private int unlitModelToCameraMatrixUnif;
+    private int unlitObjectColorUnif;
+
+
+    private final FloatBuffer mat4Buffer = BufferUtils.createFloatBuffer( Mat4.SIZE );
+    private final FloatBuffer lightBlockBuffer = BufferUtils.createFloatBuffer( LightBlock.SIZE );
+
+
+    private void loadAndSetupScene() {
+        scene = new Scene( "projCube_scene.xml" );
+
+        nodes = new ArrayList<>();
+        nodes.add( scene.findNode( "cube" ) );
+        nodes.add( scene.findNode( "rightBar" ) );
+        nodes.add( scene.findNode( "leaningBar" ) );
+        nodes.add( scene.findNode( "spinBar" ) );
+        nodes.add( scene.findNode( "diorama" ) );
+        nodes.add( scene.findNode( "floor" ) );
+
+        lightNumBinder = new UniformIntBinder();
+        SceneBinders.associateUniformWithNodes( nodes, lightNumBinder, "numberOfLights" );
+        SceneBinders.setStateBinderWithNodes( nodes, lightNumBinder );
+
+        lightProjMatBinder = new UniformMat4Binder();
+        SceneBinders.associateUniformWithNodes( nodes, lightProjMatBinder, "cameraToLightProjMatrix" );
+        SceneBinders.setStateBinderWithNodes( nodes, lightProjMatBinder );
+
+        camLightPosBinder = new UniformVec3Binder();
+        SceneBinders.associateUniformWithNodes( nodes, camLightPosBinder, "cameraSpaceProjLightPos" );
+        SceneBinders.setStateBinderWithNodes( nodes, camLightPosBinder );
+
+        int unlit = scene.findProgram( "p_unlit" );
+        sphereMesh = scene.findMesh( "m_sphere" );
+
+        int colored = scene.findProgram( "p_colored" );
+        axesMesh = scene.findMesh( "m_axes" );
+
+        // No more things that can throw.
+        spinBarOrient = nodes.get( 3 ).nodeGetOrient();
+        unlitProg = unlit;
+        unlitModelToCameraMatrixUnif = glGetUniformLocation( unlit, "modelToCameraMatrix" );
+        unlitObjectColorUnif = glGetUniformLocation( unlit, "objectColor" );
+
+        coloredProg = colored;
+        coloredModelToCameraMatrixUnif = glGetUniformLocation( colored, "modelToCameraMatrix" );
+    }
+
+
+    ////////////////////////////////
+    private static int displayWidth = 500;
+    private static int displayHeight = 500;
+
+    private Scene scene;
+    private ArrayList<SceneNode> nodes;
+    private Mesh sphereMesh, axesMesh;
+
+    private UniformMat4Binder lightProjMatBinder;
+    private UniformVec3Binder camLightPosBinder;
+
+    private Timer timer = new Timer( Timer.Type.LOOP, 10.0f );
+
+    private Quaternion spinBarOrient;
+
+    private boolean showOtherLights = true;
+    private boolean drawCameraPos;
+
+
+    ////////////////////////////////
+    // View setup.
+    private ViewData initialView = new ViewData(
+            new Vec3( 0.0f, 0.0f, 10.0f ),
+            new Quaternion( 0.909845f, 0.16043f, -0.376867f, -0.0664516f ),
+            25.0f,
+            0.0f
+    );
+
+    private ViewScale initialViewScale = new ViewScale(
+            5.0f, 70.0f,
+            2.0f, 0.5f,
+            2.0f, 0.5f,
+            90.0f / 250.0f
+    );
+
+
+    private ObjectData initLightData = new ObjectData(
+            new Vec3( 0.0f, 0.0f, 10.0f ),
+            new Quaternion( 1.0f, 0.0f, 0.0f, 0.0f )
+    );
+
+
+    private ViewPole viewPole = new ViewPole( initialView, initialViewScale, MouseButtons.MB_LEFT_BTN );
+    private ObjectPole lightPole = new ObjectPole( initLightData, 90.0f / 250.0f, MouseButtons.MB_RIGHT_BTN, viewPole );
+
+
+    ////////////////////////////////
+    private final TexDef[] texDefs = {
+            new TexDef( "IrregularPoint.dds", "Irregular Point Light" ),
+            new TexDef( "Planetarium.dds", "Planetarium" )
+    };
+    private final int NUM_LIGHT_TEXTURES = texDefs.length;
+    private int[] lightTextures = new int[texDefs.length];
+    private int currTextureIndex = 0;
+
+    private class TexDef {
+        String filename;
+        String name;
+
+        TexDef(String filename, String name) {
+            this.filename = filename;
+            this.name = name;
+        }
+    }
+
+
+    private void loadTextures() {
+        try {
+            for ( int textureIndex = 0; textureIndex < NUM_LIGHT_TEXTURES; textureIndex++ ) {
+                lightTextures[textureIndex] = glGenTextures();
+
+                String filePath = Framework.findFileOrThrow( texDefs[textureIndex].filename );
+                ImageSet imageSet = DdsLoader.loadFromFile( filePath );
+
+                glBindTexture( GL_TEXTURE_CUBE_MAP, lightTextures[textureIndex] );
+                glTexParameteri( GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, 0 );
+                glTexParameteri( GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, 0 );
+
+                Dimensions imageDimensions = imageSet.getDimensions();
+                int imageFormat = TextureGenerator.getInternalFormat( imageSet.getFormat(), 0 );
+
+                for ( int face = 0; face < 6; ++face ) {
+                    SingleImage singleImage = imageSet.getImage( 0, 0, face );
+
+                    glCompressedTexImage2D( GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, imageFormat,
+                            imageDimensions.width, imageDimensions.height, 0, singleImage.getImageData() );
+                }
+
+                glBindTexture( GL_TEXTURE_CUBE_MAP, 0 );
+            }
+        } catch ( Exception e ) {
+            e.printStackTrace();
+        }
+    }
+
+
+    ////////////////////////////////
+    private final int NUM_SAMPLERS = 1;
+
+    private int[] samplers = new int[NUM_SAMPLERS];
+    private int currSampler = 0;
+
+
+    private void createSamplers() {
+        for ( int samplerIndex = 0; samplerIndex < NUM_SAMPLERS; samplerIndex++ ) {
+            samplers[samplerIndex] = glGenSamplers();
+            glSamplerParameteri( samplers[samplerIndex], GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+            glSamplerParameteri( samplers[samplerIndex], GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+        }
+
+        glSamplerParameteri( samplers[0], GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+        glSamplerParameteri( samplers[0], GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+        glSamplerParameteri( samplers[0], GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+    }
+
+
+    ////////////////////////////////
+    private final int projectionBlockIndex = 0;
+
+    private int projectionUniformBuffer;
+
+    private class ProjectionBlock extends BufferableData<FloatBuffer> {
+        Mat4 cameraToClipMatrix;
+
+        static final int SIZE = Mat4.SIZE;
+
+        @Override
+        public FloatBuffer fillBuffer(FloatBuffer buffer) {
+            return cameraToClipMatrix.fillBuffer( buffer );
+        }
+    }
+
+
+    ////////////////////////////////
+    private static final int MAX_NUMBER_OF_LIGHTS = 4;
+
+    private final int lightBlockIndex = 1;
+    private final int lightProjTexUnit = 3;
+
+    private int lightUniformBuffer;
+    private UniformIntBinder lightNumBinder;
+
+    private class PerLight extends BufferableData<FloatBuffer> {
+        Vec4 cameraSpaceLightPos;
+        Vec4 lightIntensity;
+
+        static final int SIZE = Vec4.SIZE + Vec4.SIZE;
+
+        @Override
+        public FloatBuffer fillBuffer(FloatBuffer buffer) {
+            cameraSpaceLightPos.fillBuffer( buffer );
+            lightIntensity.fillBuffer( buffer );
+
+            return buffer;
+        }
+    }
+
+    private class LightBlock extends BufferableData<FloatBuffer> {
+        Vec4 ambientIntensity;
+        float lightAttenuation;
+        float maxIntensity;
+        float padding[] = new float[2];
+        PerLight lights[] = new PerLight[MAX_NUMBER_OF_LIGHTS];
+
+        static final int SIZE = Vec4.SIZE + ((1 + 1 + 2) * FLOAT_SIZE) + PerLight.SIZE * MAX_NUMBER_OF_LIGHTS;
+
+        @Override
+        public FloatBuffer fillBuffer(FloatBuffer buffer) {
+            ambientIntensity.fillBuffer( buffer );
+            buffer.put( lightAttenuation );
+            buffer.put( maxIntensity );
+            buffer.put( padding );
+
+            for ( PerLight light : lights ) {
+                if ( light == null ) { break; }
+
+                light.fillBuffer( buffer );
+            }
+
+            return buffer;
+        }
+    }
+
+
+    private void buildLights(Mat4 camMatrix) {
+        LightBlock lightData = new LightBlock();
+        lightData.ambientIntensity = new Vec4( 0.2f, 0.2f, 0.2f, 1.0f );
+        lightData.lightAttenuation = 1.0f / (30.0f * 30.0f);
+        lightData.maxIntensity = 2.0f;
+
+        lightData.lights[0] = new PerLight();
+        lightData.lights[0].lightIntensity = new Vec4( 0.2f, 0.2f, 0.2f, 1.0f );
+        lightData.lights[0].cameraSpaceLightPos = Mat4.mul( camMatrix,
+                Glm.normalize( new Vec4( -0.2f, 0.5f, 0.5f, 0.0f ) ) );
+
+        lightData.lights[1] = new PerLight();
+        lightData.lights[1].lightIntensity = new Vec4( 3.5f, 6.5f, 3.0f, 1.0f ).scale( 0.5f );
+        lightData.lights[1].cameraSpaceLightPos = Mat4.mul( camMatrix, new Vec4( 5.0f, 6.0f, 0.5f, 1.0f ) );
+
+        if ( showOtherLights ) {
+            lightNumBinder.setValue( 2 );
+        } else {
+            lightNumBinder.setValue( 0 );
+        }
+
+        glBindBuffer( GL_UNIFORM_BUFFER, lightUniformBuffer );
+        glBufferData( GL_UNIFORM_BUFFER, lightData.fillAndFlipBuffer( lightBlockBuffer ), GL_STREAM_DRAW );
+    }
 }
