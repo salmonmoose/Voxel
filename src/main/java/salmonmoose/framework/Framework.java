@@ -25,8 +25,6 @@ public class Framework {
     public static String findFileOrThrow(String filename) {
         InputStream fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream( COMMON_DATAPATH + filename );
 
-        System.err.println(fileStream);
-        
         if ( fileStream != null ) {
             return COMMON_DATAPATH + filename;
         }

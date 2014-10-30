@@ -36,8 +36,6 @@ import static org.lwjgl.opengl.GL33.*;
 
 public class Voxel extends LWJGLWindow {
     public static void main(String[] args) {
-        //Framework.CURRENT_TUTORIAL_DATAPATH = "/fcagnin/jgltut/tut17/data/";
-
         new Voxel().start( displayWidth, displayHeight );
     }
 
@@ -75,6 +73,8 @@ public class Voxel extends LWJGLWindow {
             System.exit( -1 );
         }
 
+        scalarField = new ScalarField();
+
         lightUniformBuffer = glGenBuffers();
         glBindBuffer( GL_UNIFORM_BUFFER, lightUniformBuffer );
         glBufferData( GL_UNIFORM_BUFFER, LightBlock.SIZE, GL_STREAM_DRAW );
@@ -88,7 +88,7 @@ public class Voxel extends LWJGLWindow {
     protected void display() {
         timer.update( getElapsedTime() );
 
-        glClearColor( 0.8f, 0.8f, 0.8f, 1.0f );
+        glClearColor( 0.2f, 0.2f, 0.8f, 1.0f );
         glClearDepth( 1.0f );
         glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 
@@ -100,11 +100,24 @@ public class Voxel extends LWJGLWindow {
 
         buildLights( cameraMatrix );
 
-        nodes.get( 0 ).nodeSetOrient( Glm.rotate( new Quaternion( 1.0f ), 360.0f * timer.getAlpha(),
-                new Vec3( 0.0f, 1.0f, 0.0f ) ) );
+        nodes.get( 0 ).nodeSetOrient(
+            Glm.rotate(
+                new Quaternion( 1.0f ),
+                360.0f * timer.getAlpha(),
+                new Vec3( 0.0f, 1.0f, 0.0f )
+            )
+        );
 
-        nodes.get( 3 ).nodeSetOrient( Quaternion.mul( spinBarOrient, Glm.rotate( new Quaternion( 1.0f ),
-                360.0f * timer.getAlpha(), new Vec3( 0.0f, 0.0f, 1.0f ) ) ) );
+        nodes.get( 3 ).nodeSetOrient(
+            Quaternion.mul(
+                spinBarOrient,
+                Glm.rotate( 
+                    new Quaternion( 1.0f ),
+                    360.0f * timer.getAlpha(),
+                    new Vec3( 0.0f, 0.0f, 1.0f ) 
+                )
+            )
+        );
 
         {
             MatrixStack persMatrix = new MatrixStack();
@@ -136,7 +149,9 @@ public class Voxel extends LWJGLWindow {
         }
 
         glViewport( 0, 0, displayWidth, displayHeight );
-        scene.render( modelMatrix.top() );
+        //scene.render( modelMatrix.top() );
+
+        scalarField.render();
 
         {
             // Draw axes
@@ -331,8 +346,8 @@ public class Voxel extends LWJGLWindow {
 
 
     ////////////////////////////////
-    private static int displayWidth = 500;
-    private static int displayHeight = 500;
+    private static int displayWidth = 320;
+    private static int displayHeight = 240;
 
     private Scene scene;
     private ArrayList<SceneNode> nodes;
@@ -348,6 +363,7 @@ public class Voxel extends LWJGLWindow {
     private boolean showOtherLights = true;
     private boolean drawCameraPos;
 
+    private ScalarField scalarField;
 
     ////////////////////////////////
     // View setup.
