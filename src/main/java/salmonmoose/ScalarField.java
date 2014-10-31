@@ -4,7 +4,11 @@ import salmonmoose.glm.*;
 import org.lwjgl.BufferUtils;
 
 import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
 import java.nio.FloatBuffer;
+
+import java.util.ArrayList;
+import java.util.Collections;
 
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13;
@@ -29,12 +33,96 @@ public class ScalarField {
 	private int vboiId = 0;
 	private int indicesCount = 0;
 
+	private static final int X_SIZE = 16;
+	private static final int Y_SIZE = 16;
+	private static final int Z_SIZE = 16;
+	private static final int SIZE = X_SIZE * Y_SIZE * Z_SIZE;
+
 	private TexturedVertex[] vertices = null;
+	private ArrayList<TexturedVertex> vertexList = new ArrayList<TexturedVertex>();
+	private ArrayList<Integer> indexList = new ArrayList<Integer>();
 	private ByteBuffer vertexByteBuffer = null;
 	private ByteBuffer verticesByteBuffer = null;
+	private IntBuffer vertexIntBuffer = null;
+	private IntBuffer verticesIntBuffer = null;
+
+	private float[] field = null;
 
 	public ScalarField() {
-		setupQuad();
+		setupField();
+
+		setupBoxel();
+	}
+
+	public static int partBy1(int n) {
+        n&= 0x0000ffff;
+
+        n = (n | (n << 8)) & 0x00FF00FF;
+        n = (n | (n << 4)) & 0x0F0F0F0F;
+        n = (n | (n << 2)) & 0x33333333;
+        n = (n | (n << 1)) & 0x55555555;
+        return n;
+	}
+
+	public static int partBy2(int n) {
+        n&= 0x000003ff;
+
+        n = (n ^ (n << 16)) & 0xff0000ff;
+        n = (n ^ (n <<  8)) & 0x0300f00f;
+        n = (n ^ (n <<  4)) & 0x030c30c3;
+        n = (n ^ (n <<  2)) & 0x09249249;
+        
+        return n;
+	}
+
+	public static int zipBy1(int n) {
+    	n&= 0x55555555;
+
+        n = (n ^ (n >> 1)) & 0x33333333;
+        n = (n ^ (n >> 2)) & 0x0f0f0f0f;
+        n = (n ^ (n >> 4)) & 0x00ff00ff;
+        n = (n ^ (n >> 8)) & 0x0000ffff;
+        
+        return n;
+	}
+
+	public static int zipBy2(int n) {
+		n&= 0x09249249;
+
+        n = (n ^ (n >>  2)) & 0x030c30c3;
+        n = (n ^ (n >>  4)) & 0x0300f00f;
+        n = (n ^ (n >>  8)) & 0xff0000ff;
+        n = (n ^ (n >> 16)) & 0x000003ff;
+        
+        return n;
+	}
+
+	public static int PosToIndex(int x, int y, int z) {
+		return partBy2(x) | (partBy2(y) << 1) | (partBy2(z) << 2);
+	}
+
+	public static int IndexToPosX(int index) {
+		return zipBy2(index);
+	}
+
+	public static int IndexToPosY(int index) {
+		return zipBy2(index >> 1);
+	}
+
+	public static int IndexToPosZ(int index) {
+		return zipBy2(index >> 2);
+	}
+
+	public void setupField() {
+		field = new float[SIZE];
+
+		for (int z = 0; z < Z_SIZE; z++) {
+			for (int y = 0; y < Y_SIZE; y++) {
+				for (int x = 0; x < X_SIZE; x++) {
+					field[PosToIndex(x,y,z)] = (float)Math.random();
+				}
+			}
+		}
 	}
 
 	public void render() {
@@ -48,7 +136,7 @@ public class ScalarField {
 		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, vboiId);
 		
 		// Draw the vertices
-		GL11.glDrawElements(GL11.GL_TRIANGLES, indicesCount, GL11.GL_UNSIGNED_BYTE, 0);
+		GL11.glDrawElements(GL11.GL_TRIANGLES, indicesCount, GL11.GL_UNSIGNED_INT, 0);
 		
 		// Put everything back to default (deselect)
 		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -58,91 +146,49 @@ public class ScalarField {
 		GL30.glBindVertexArray(0);
 	}
 
-	private void setupQuad() {
-		// We'll define our quad using 4 vertices of the custom 'TexturedVertex' class
-		TexturedVertex v0 = new TexturedVertex(); 
-		v0.setXYZ(-0.5f, -0.5f, -0.5f);
-		v0.setRGB(0, 0, 0);
-		v0.setST(0, 0);
-		
-		TexturedVertex v1 = new TexturedVertex();
-		v1.setXYZ(-0.5f, -0.5f, 0.5f);
-		v1.setRGB(0, 0, 1);
-		v1.setST(0, 0);
+	private void setupBoxel() {
+		for (int z = 0; z < Z_SIZE; z++) {
+			for (int y = 0; y < Y_SIZE; y++) {
+				for (int x = 0; x < X_SIZE; x++) {
+					//if value is above .5, fill.
+					if (field[PosToIndex(x,y,z)] > 0.5f) {
+						makeCube((float) x, (float) y, (float) z);
+					}
+				}
+			}
+		}
+		setupVBO();
+	}
 
-		TexturedVertex v2 = new TexturedVertex();
-		v2.setXYZ(-0.5f, 0.5f, -0.5f);
-		v2.setRGB(0, 1, 0);
-		v2.setST(0, 0);
-
-		TexturedVertex v3 = new TexturedVertex();
-		v3.setXYZ(-0.5f, 0.5f, 0.5f);
-		v3.setRGB(0, 1, 1);
-		v3.setST(0, 0);		
-
-		TexturedVertex v4 = new TexturedVertex(); 
-		v4.setXYZ(0.5f, -0.5f, -0.5f);
-		v4.setRGB(1, 0, 0);
-		v4.setST(0, 0);
-		
-		TexturedVertex v5 = new TexturedVertex();
-		v5.setXYZ(0.5f, -0.5f, 0.5f);
-		v5.setRGB(1, 0, 1);
-		v5.setST(0, 0);
-
-		TexturedVertex v6 = new TexturedVertex();
-		v6.setXYZ(0.5f, 0.5f, -0.5f);
-		v6.setRGB(1, 1, 0);
-		v6.setST(0, 0);
-
-		TexturedVertex v7 = new TexturedVertex();
-		v7.setXYZ(0.5f, 0.5f, 0.5f);
-		v7.setRGB(1, 1, 1);
-		v7.setST(0, 0);
-		
-		vertices = new TexturedVertex[] {v0, v1, v2, v3, v4, v5, v6, v7};
-		
-		// Create a FloatBufer of the appropriate size for one vertex
+	private void setupVBO() {
 		vertexByteBuffer = BufferUtils.createByteBuffer(TexturedVertex.stride);
-		
-		// Put each 'Vertex' in one FloatBuffer
-		verticesByteBuffer = BufferUtils.createByteBuffer(vertices.length * 
-				TexturedVertex.stride);				
+		verticesByteBuffer = BufferUtils.createByteBuffer(vertexList.size() * TexturedVertex.stride);
+
 		FloatBuffer verticesFloatBuffer = verticesByteBuffer.asFloatBuffer();
-		for (int i = 0; i < vertices.length; i++) {
+
+		for (int i = 0; i < vertexList.size(); i++) {
 			// Add position, color and texture floats to the buffer
-			verticesFloatBuffer.put(vertices[i].getElements());
+			verticesFloatBuffer.put(vertexList.get(i).getElements());
 		}
 		verticesFloatBuffer.flip();
-		
-		
-		// OpenGL expects to draw vertices in counter clockwise order by default
-		byte[] indices = {
-				0, 3, 1, //x -1
-				0, 2, 3,
-				4, 5, 7, //x +1
-				4, 7, 6,
-				0, 5, 4, //y -1
-				0, 1, 5,
-				2, 6, 7, //y +1
-				2, 7, 3,
-				2, 0, 4, //z -1
-				2, 4, 6,
-				3, 5, 1, //z +1
-				3, 7, 5
 
-		};
-		indicesCount = indices.length;
-		ByteBuffer indicesBuffer = BufferUtils.createByteBuffer(indicesCount);
-		indicesBuffer.put(indices);
+		indicesCount = indexList.size();
+
+		IntBuffer indicesBuffer = BufferUtils.createIntBuffer(indicesCount);
+		for (int i = 0; i < indexList.size(); i++) {
+			indicesBuffer.put(indexList.get(i));
+		}
+
 		indicesBuffer.flip();
 		
 		// Create a new Vertex Array Object in memory and select it (bind)
 		vaoId = GL30.glGenVertexArrays();
+
 		GL30.glBindVertexArray(vaoId);
 		
 		// Create a new Vertex Buffer Object in memory and select it (bind)
 		vboId = GL15.glGenBuffers();
+
 		GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vboId);
 		GL15.glBufferData(GL15.GL_ARRAY_BUFFER, verticesFloatBuffer, GL15.GL_STREAM_DRAW);
 		
@@ -163,8 +209,77 @@ public class ScalarField {
 		
 		// Create a new VBO for the indices and select it (bind) - INDICES
 		vboiId = GL15.glGenBuffers();
+
 		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, vboiId);
-		GL15.glBufferData(GL15.GL_ELEMENT_ARRAY_BUFFER, indicesBuffer, GL15.GL_STATIC_DRAW);
+		GL15.glBufferData(GL15.GL_ELEMENT_ARRAY_BUFFER, indicesBuffer.capacity() * 4, GL15.GL_STATIC_DRAW);
+		GL15.glBufferSubData(GL15.GL_ELEMENT_ARRAY_BUFFER, 0, indicesBuffer);
 		GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
+	}
+
+	private void makeCube(float offsetX, float offsetY, float offsetZ) {
+		TexturedVertex vTemp = new TexturedVertex();
+		int indexOffset = vertexList.size();
+
+		vTemp.setXYZ(-0.5f + offsetX, -0.5f + offsetY, -0.5f + offsetZ);
+		vTemp.setRGB(0, 0, 0);
+		vTemp.setST(0, 0);
+		vertexList.add(vTemp);
+
+		vTemp = new TexturedVertex();				
+		vTemp.setXYZ(-0.5f + offsetX, -0.5f + offsetY, 0.5f + offsetZ);
+		vTemp.setRGB(0, 0, 1);
+		vTemp.setST(0, 0);
+		vertexList.add(vTemp);
+		
+		vTemp = new TexturedVertex();
+		vTemp.setXYZ(-0.5f + offsetX, 0.5f + offsetY, -0.5f + offsetZ);
+		vTemp.setRGB(0, 1, 0);
+		vTemp.setST(0, 0);
+		vertexList.add(vTemp);
+
+		vTemp = new TexturedVertex();
+		vTemp.setXYZ(-0.5f + offsetX, 0.5f + offsetY, 0.5f + offsetZ);
+		vTemp.setRGB(0, 1, 1);
+		vTemp.setST(0, 0);
+		vertexList.add(vTemp);
+
+		vTemp = new TexturedVertex();
+		vTemp.setXYZ(0.5f + offsetX, -0.5f + offsetY, -0.5f + offsetZ);
+		vTemp.setRGB(1, 0, 0);
+		vTemp.setST(0, 0);
+		vertexList.add(vTemp);
+
+		vTemp = new TexturedVertex();
+		vTemp.setXYZ(0.5f + offsetX, -0.5f + offsetY, 0.5f + offsetZ);
+		vTemp.setRGB(1, 0, 1);
+		vTemp.setST(0, 0);
+		vertexList.add(vTemp);
+
+		vTemp = new TexturedVertex();
+		vTemp.setXYZ(0.5f + offsetX, 0.5f + offsetY, -0.5f + offsetZ);
+		vTemp.setRGB(1, 1, 0);
+		vTemp.setST(0, 0);
+		vertexList.add(vTemp);
+
+		vTemp = new TexturedVertex();
+		vTemp.setXYZ(0.5f + offsetX, 0.5f + offsetY, 0.5f + offsetZ);
+		vTemp.setRGB(1, 1, 1);
+		vTemp.setST(0, 0);
+		vertexList.add(vTemp);
+
+		Collections.addAll(indexList,
+			0 + indexOffset, 3 + indexOffset, 1 + indexOffset, //x -1
+			0 + indexOffset, 2 + indexOffset, 3 + indexOffset,
+			4 + indexOffset, 5 + indexOffset, 7 + indexOffset, //x +1
+			4 + indexOffset, 7 + indexOffset, 6 + indexOffset,
+			0 + indexOffset, 5 + indexOffset, 4 + indexOffset, //y -1
+			0 + indexOffset, 1 + indexOffset, 5 + indexOffset,
+			2 + indexOffset, 6 + indexOffset, 7 + indexOffset, //y +1
+			2 + indexOffset, 7 + indexOffset, 3 + indexOffset,
+			2 + indexOffset, 0 + indexOffset, 4 + indexOffset, //z -1
+			2 + indexOffset, 4 + indexOffset, 6 + indexOffset,
+			3 + indexOffset, 5 + indexOffset, 1 + indexOffset, //z +1
+			3 + indexOffset, 7 + indexOffset, 5 + indexOffset
+		);
 	}
 }

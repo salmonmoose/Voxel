@@ -368,7 +368,7 @@ public class Voxel extends LWJGLWindow {
     ////////////////////////////////
     // View setup.
     private ViewData initialView = new ViewData(
-            new Vec3( 0.0f, 0.0f, 10.0f ),
+            new Vec3( 0.0f, 0.0f, 0.0f ),
             new Quaternion( 0.909845f, 0.16043f, -0.376867f, -0.0664516f ),
             25.0f,
             0.0f
